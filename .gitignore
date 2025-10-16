@@ -1,0 +1,6 @@
+/input_products
+/output_products
+# ds store, pychache
+.DS_Store
+__pycache__/
+*.pyc
