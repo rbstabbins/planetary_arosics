@@ -173,7 +173,9 @@ def get_raster_grs_bounds(raster_path: Union[str, Path]) -> np.ndarray:
 
 def arosics_global_coreg(
     ref_path: Path,
-    tgt_path: Path
+    tgt_path: Path,
+    ws: int=64,
+    max_shift: int=20
     ):
     """Perform global co-registration using AROSICS.
 
@@ -190,8 +192,8 @@ def arosics_global_coreg(
         im_ref=str(ref_path),
         im_tgt=str(tgt_path),
         nodata=(255,255),
-        ws=(32,32),
-        max_shift=64,
+        ws=(ws,ws),
+        max_shift=max_shift,
         path_out=str(coreg_path),
         fmt_out='GTIFF')
     
@@ -205,6 +207,7 @@ def arosics_local_coreg(
     ref_path: Path,
     tgt_path: Path,
     grid_res: int = 8,
+    max_shift: int = 20
     ):
     """Perform local co-registration using AROSICS.
 
@@ -222,9 +225,10 @@ def arosics_local_coreg(
         im_ref=str(ref_path),
         im_tgt=str(tgt_path),
         grid_res=grid_res, # pixels separating tie points in tgt
-        max_shift=64,
+        max_shift=max_shift, # max shift in pixels
         path_out=str(local_coreg_path),
         fmt_out='GTIFF',
+        min_reliability=0,
         nodata=(255,255))
     CRL.correct_shifts()
 
