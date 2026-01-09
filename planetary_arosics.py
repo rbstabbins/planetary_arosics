@@ -1,21 +1,26 @@
 from pathlib import Path
-from typing import Union
+from typing import Union, Tuple
 import arosics
 from arosics import DESHIFTER
+from geoarray.baseclasses import GeoArray
 import numpy as np
 from osgeo import gdal
 from pyproj import CRS, Transformer
 import rasterio as rio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.windows import from_bounds
 
-def output_path(input_path: Path, suffix: str) -> Path:
+
+# Helper functions
+
+def generate_output_path(input_path: Union[Path,str], suffix: str) -> Path:
     """Generate an output file path based on the input file path.
     :param input_path: Path to the input file.
     :type input_path: Path
     :return: Path to the output file.
     :rtype: Path
     """
-    if not isinstance(input_path, Path):
+    if isinstance(input_path, str):
         input_path = Path(input_path)
 
     input_dir = input_path.parent.parent.parent.parent
@@ -23,13 +28,65 @@ def output_path(input_path: Path, suffix: str) -> Path:
     instrument = input_path.parent.parent.parent.name
     product = input_path.parent.parent.name
     scene = input_path.parent.name
-    output_dir = input_dir.parent / 'output_products'  / instrument / product / scene
+    output_dir = input_dir.parent / 'output_products' / instrument / product / scene
     output_dir.mkdir(parents=True, exist_ok=True)   
     
     # define the output file path    
     output_path = output_dir / (input_path.stem + suffix)    
 
     return output_path
+
+def get_raster_bounds(
+        raster_path: Union[str, Path], 
+        bounds_type: Union[str, np.array]) -> Union[str, np.array]:
+    """Get the bounds of a raster file.
+
+    :param raster_path: Path to the raster file.
+    :type raster_path: Union[str, Path]
+    :return: Bounds of the raster file as a string.
+    :rtype: str
+    """
+    with rio.open(raster_path) as src:
+        bounds = np.array(src.bounds)
+    if bounds_type is str:
+        return f"{bounds[0]:.2f}/{bounds[2]:.2f}/{bounds[1]:.2f}/{bounds[3]:.2f}"
+    else:
+        return bounds
+        
+# def str_bounds_to_numpy(bounds_str: str) -> np.ndarray:
+#     """Convert a bounds string to a numpy array.
+
+#     :param bounds_str: Bounds string in the format "minx/maxx/miny/maxy".
+#     :type bounds_str: str
+#     :return: Numpy array of bounds [minx, miny, maxx, maxy].
+#     :rtype: np.ndarray
+#     """
+#     bounds_list = [float(coord) for coord in bounds_str.split('/')]
+#     return np.array([bounds_list[0], bounds_list[2], bounds_list[1], bounds_list[3]])
+
+def pds2geotiff(pds_file: Path, noData: float=0) -> Path:
+    """Convert a PDS .img file to a GeoTIFF file.
+
+    :param pds_file: Path to the PDS .img file to be converted.
+    :type pds_file: Path
+    :return: Path to the converted GeoTIFF file.
+    :rtype: Path
+    """    
+    gdal.AllRegister()
+
+    geo_tiff_out = generate_output_path(pds_file, suffix='.tif')
+
+    gdal.Translate(
+        str(geo_tiff_out),
+        str(pds_file),
+        format='GTiff',        
+        noData=noData,
+        creationOptions=['COMPRESS=LZW']
+    )
+
+    return geo_tiff_out
+
+# CRS conversion functions
 
 def geotiff_2_geo_crs(gtiff_file: Path) -> Path:
     """Convert the CRS of a GeoTIFF file to a geographic CRS.
@@ -46,7 +103,7 @@ def geotiff_2_geo_crs(gtiff_file: Path) -> Path:
     :rtype: Union[str, Path]
     """
     # check if the input is a Path object
-    geo_gtiff_file = output_path(gtiff_file, suffix='_grs.tif')
+    geo_gtiff_file = generate_output_path(gtiff_file, suffix='_grs.tif')
 
     # open the GeoTIFF file with rasterio
     with rio.open(gtiff_file, driver='GTiff') as src:
@@ -85,28 +142,6 @@ def geotiff_2_geo_crs(gtiff_file: Path) -> Path:
 
     return geo_gtiff_file
 
-def pds2geotiff(pds_file: Path, noData: float=0) -> Path:
-    """Convert a PDS .img file to a GeoTIFF file.
-
-    :param pds_file: Path to the PDS .img file to be converted.
-    :type pds_file: Path
-    :return: Path to the converted GeoTIFF file.
-    :rtype: Path
-    """    
-    gdal.AllRegister()
-
-    geo_tiff_out = output_path(pds_file, suffix='.tif')
-
-    gdal.Translate(
-        str(geo_tiff_out),
-        str(pds_file),
-        format='GTiff',        
-        noData=noData,
-        creationOptions=['COMPRESS=LZW']
-    )
-
-    return geo_tiff_out
-
 def inherit_crs(
     src_crs_path: Path,
     dst_crs_path: Path,
@@ -142,7 +177,7 @@ def inherit_crs(
     })
     # create a new GeoTIFF file with the updated CRS - need a new string to denote the change
     suffix = crs_id # need a concise name for the new CRS used)
-    dst_crs_tmp_path = output_path(dst_crs_path, suffix=f'_{suffix}.tif')
+    dst_crs_tmp_path = generate_output_path(dst_crs_path, suffix=f'_{suffix}.tif')
 
     with rio.open(dst_crs_tmp_path, 'w', **kwargs) as dst: # this has the properties of the CRISM, destination, raster
         for i in range(1, dst_raster.count + 1):
@@ -159,42 +194,109 @@ def inherit_crs(
         
     return dst_crs_tmp_path
 
-def get_raster_grs_bounds(raster_path: Union[str, Path]) -> np.ndarray:
-    """Get the bounds of a raster file.
+# Co-registration functions
 
-    :param raster_path: Path to the raster file.
-    :type raster_path: Union[str, Path]
-    :return: Bounds of the raster file as a string.
-    :rtype: np.ndarray
-    """
-    with rio.open(raster_path) as src:
-        bounds = np.array(src.bounds)
-    return f"{bounds[0]:.2f}/{bounds[2]:.2f}/{bounds[1]:.2f}/{bounds[3]:.2f}"
+def bbox_mask_geoarray(geotiff_path, bbox, nodata_val=False):
+    
+    # """
+    # Create a geoarray.GeoArray mask from a bounding box.
+
+    # Pixels outside the bounding box are True (masked), inside are False.
+
+    # Parameters
+    # ----------
+    # geotiff_path : str
+    #     Path to a geographic GeoTIFF (north-up).
+    # bbox : tuple
+    #     (minx, miny, maxx, maxy) in same CRS as raster.
+    # nodata_val : int or bool
+    #     Pixel value for mask output (optional). Default False for inside bbox.
+
+    # Returns
+    # -------
+    # mask_ga : geoarray.GeoArray
+    #     A GeoArray whose `.arr` is a 2D boolean array,
+    #     with geotransform + projection from source raster.
+    # """
+
+    # if bbox is string, convert to numpy array
+    if isinstance(bbox, str):
+        bbox = str_bounds_to_numpy(bbox)
+        
+    # Read raster metadata
+    with rio.open(geotiff_path) as ds:
+        # Compute the pixel window covering the bounding box
+        window = from_bounds(*bbox, transform=ds.transform)
+        window = window.round_offsets().round_lengths()
+
+        # Make a base boolean array: True = outside bbox
+        base_mask = np.ones((ds.height, ds.width), dtype=bool)
+
+        # Set inside bbox pixels to False
+        base_mask[
+            window.row_off : window.row_off + window.height,
+            window.col_off : window.col_off + window.width
+        ] = False
+
+        # Optionally, represent masked vs. unmasked with nodata_val
+        # (e.g., if users want 0/1 or specific class codes)
+        mask_arr = base_mask.astype(type(nodata_val))
+        mask_arr[~base_mask] = nodata_val
+
+        # Create a GeoArray from this array & georeferencing info
+        mask_ga = GeoArray(
+            mask_arr,
+            geotransform=ds.transform.to_gdal(),
+            projection=ds.crs.to_wkt() if ds.crs else None
+        )
+
+    return mask_ga
 
 def arosics_global_coreg(
     ref_path: Path,
     tgt_path: Path,
-    ws: int=64,
-    max_shift: int=20
-    ):
+    no_data: int = 255,
+    ws: int = 64,
+    max_shift: int = 20,
+    ref_mask_bbox: Union[None, tuple] = None,
+    tgt_mask_bbox: Union[None, tuple] = None
+    ) -> Tuple[Path, arosics.COREG]:
     """Perform global co-registration using AROSICS.
 
     :param ref_path: Path to the reference image.
     :type ref_path: Path
     :param tgt_path: Path to the target image.
     :type tgt_path: Path
+    :param no_data: No data value for the images.
+    :type no_data: int
+    :param ws: Window size for the co-registration.
+    :type ws: int
+    :param max_shift: Maximum shift for the co-registration.
+    :type max_shift: int
+    :param ref_mask_bbox: Bounding box to mask the reference image (minx, miny, maxx, maxy).
+    :type ref_mask_bbox: Union[None, tuple]       
+    :param tgt_mask_bbox: Bounding box to mask the target image (minx, miny, maxx, maxy).
+    :type tgt_mask_bbox: Union[None, tuple]
+    :return: Path to the co-registered output image and the AROSICS COREg object.
+    :rtype: Tuple[Path, arosics.COREG]
     """
 
     # set output path for the co-registered output
-    coreg_path = output_path(tgt_path, suffix='_crg.tif')
+    coreg_path = generate_output_path(tgt_path, suffix='_crg.tif')
+
+    # initialise target and/or reference bad data masks
+    mask_baddata_ref = bbox_mask_geoarray(ref_path, ref_mask_bbox, nodata_val=False) if ref_mask_bbox else None
+    mask_baddata_tgt = bbox_mask_geoarray(tgt_path, tgt_mask_bbox, nodata_val=False) if tgt_mask_bbox else None
 
     CRG = arosics.COREG(
         im_ref=str(ref_path),
         im_tgt=str(tgt_path),
-        nodata=(255,255),
+        nodata=(no_data,no_data),
         ws=(ws,ws),
         max_shift=max_shift,
         path_out=str(coreg_path),
+        mask_baddata_ref=mask_baddata_ref,
+        mask_baddata_tgt=mask_baddata_tgt,
         fmt_out='GTIFF')
     
     CRG.calculate_spatial_shifts()
@@ -207,7 +309,9 @@ def arosics_local_coreg(
     ref_path: Path,
     tgt_path: Path,
     grid_res: int = 8,
-    max_shift: int = 20
+    no_data: int = 255,
+    ws: int = 64,
+    max_shift: int = 20,
     ):
     """Perform local co-registration using AROSICS.
 
@@ -219,17 +323,17 @@ def arosics_local_coreg(
     :rtype: Path
     """
     # set output path for the co-registered output  
-    local_coreg_path = output_path(tgt_path, suffix='_crl.tif')
+    local_coreg_path = generate_output_path(tgt_path, suffix='_crl.tif')
 
     CRL = arosics.COREG_LOCAL(
         im_ref=str(ref_path),
         im_tgt=str(tgt_path),
         grid_res=grid_res, # pixels separating tie points in tgt
-        max_shift=max_shift, # max shift in pixels
+        nodata=(no_data,no_data),
+        window_size=(ws, ws),
+        max_shift=max_shift,
         path_out=str(local_coreg_path),
-        fmt_out='GTIFF',
-        min_reliability=0,
-        nodata=(255,255))
+        fmt_out='GTIFF')
     CRL.correct_shifts()
 
     return local_coreg_path, CRL
@@ -240,7 +344,7 @@ def apply_coreg(img2shift_path: Path, global_crg: None, local_crg: None) -> str:
         raise ValueError("At least one of global_crg or local_crg must be provided.")
 
     if global_crg:
-        global_shifted_img_path = output_path(img2shift_path, suffix='_crg.tif')
+        global_shifted_img_path = generate_output_path(img2shift_path, suffix='_crg.tif')
         # first apply the global coregistration
         DESHIFTER(
             str(img2shift_path), 
@@ -255,7 +359,7 @@ def apply_coreg(img2shift_path: Path, global_crg: None, local_crg: None) -> str:
     
     if local_crg:
         # then apply the local coregistration
-        local_shifted_img_path = output_path(img2shift_path, suffix='_crl.tif')
+        local_shifted_img_path = generate_output_path(img2shift_path, suffix='_crl.tif')
         DESHIFTER(
             str(img2shift_path), 
             local_crg.coreg_info, 
