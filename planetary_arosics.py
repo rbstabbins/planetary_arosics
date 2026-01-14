@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Union, Tuple
+from typing import List, Tuple, Union
 import arosics
 from arosics import DESHIFTER
 from geoarray.baseclasses import GeoArray
 import numpy as np
 from osgeo import gdal
+import pygmt
 from pyproj import CRS, Transformer
 import rasterio as rio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
@@ -63,6 +64,46 @@ def get_raster_bounds(
 #     """
 #     bounds_list = [float(coord) for coord in bounds_str.split('/')]
 #     return np.array([bounds_list[0], bounds_list[2], bounds_list[1], bounds_list[3]])
+
+def show_raster(raster_path: Path, title: str='', region: str=None) -> None:
+    fig = pygmt.Figure()
+    fig.grdimage(
+        grid=raster_path,
+        region=region,
+        shading=False,
+        cmap='gray',
+        frame=['xaf','yaf', '+t'+title],
+    )
+    fig.show()
+
+def show_rasters(
+        base_raster: Path, 
+        layer_rasters: List[Path], 
+        title: str='', 
+        region: str=None) -> None:
+
+    fig = pygmt.Figure()
+    
+    fig.grdimage(
+        grid=base_raster,
+        region=region,
+        shading=False,
+        cmap='gray',
+        frame=['xaf','yaf', '+t'+title],
+    )
+
+    for raster_path in layer_rasters:
+    
+        fig.grdimage(
+            grid=raster_path,
+            region=region,
+            shading=False,
+            cmap='gray',
+            nan_transparent="white",
+            transparency=50,  # Set transparency for the drape grid
+        )
+
+    fig.show()
 
 def pds2geotiff(pds_file: Path, noData: float=0) -> Path:
     """Convert a PDS .img file to a GeoTIFF file.
