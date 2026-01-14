@@ -11,7 +11,7 @@ from rasterio.warp import calculate_default_transform, reproject, Resampling
 from rasterio.windows import from_bounds
 
 
-# Helper functions
+# Loading and helper functions
 
 def generate_output_path(input_path: Union[Path,str], suffix: str) -> Path:
     """Generate an output file path based on the input file path.
@@ -369,3 +369,9 @@ def apply_coreg(img2shift_path: Path, global_crg: None, local_crg: None) -> str:
         shifted_img_path = local_shifted_img_path
 
     return shifted_img_path
+
+# Visualization functions
+
+# show raster
+
+# show rasters.
